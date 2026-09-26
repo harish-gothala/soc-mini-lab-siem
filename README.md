@@ -1,35 +1,9 @@
-# SOC Mini Lab — SIEM Correlation, Alert Tuning & MITRE ATT&CK Mapping
+# PROJECT 1 — SOC Mini Lab with SIEM Correlation
+### Detection Logic, Alert Tuning & MITRE ATT&CK Mapping
 
-A self-built home Security Operations Center (SOC) lab that ingests logs from multiple endpoints, deploys network intrusion detection, generates real attack traffic, correlates that traffic into actionable alerts, and documents the detection logic — including tuning out false positives and mapping detections to the MITRE ATT&CK framework.
-
-**Author:** Harish Yadav · [LinkedIn](https://linkedin.com/in/harish-yadav-gothala) · [GitHub](https://github.com/harish-gothala)
-**Environment:** VMware Workstation (3 VMs, isolated NAT network `192.168.49.0/24`) · **Date:** September 2026
-
----
-
-## Skills Demonstrated
-
-- Deploying and configuring a SIEM (Elasticsearch + Kibana) via Docker
-- Shipping logs from Windows (Sysmon, Winlogbeat) and Linux (Filebeat) endpoints
-- Deploying and tuning a network IDS (Suricata, Emerging Threats Open ruleset)
-- Simulating real attacks (SSH brute-force with Hydra, port scanning with Nmap)
-- Writing and verifying a live SIEM correlation rule (KQL) against real attack traffic
-- Investigating and tuning a false positive with a targeted suppression rule
-- Diagnosing a genuine detection gap and explaining the root cause
-- Mapping verified detections to the MITRE ATT&CK framework
-- Clear technical documentation of decisions, trade-offs, and substitutions
-
-## Table of Contents
-
-1. [Goal](#1-goal)
-2. [Lab Architecture](#2-lab-architecture)
-3. [Tools Used](#3-tools-used)
-4. [Steps Completed](#4-steps-completed)
-5. [Detection Rules](#5-detection-rules)
-6. [Alert Tuning Notes](#6-alert-tuning-notes)
-7. [MITRE ATT&CK Mapping](#7-mitre-attck-mapping)
-8. [Known Limitations & Future Work](#8-known-limitations--future-work)
-9. [Deliverables Checklist](#9-deliverables-checklist)
+**Author:** Luffy007
+**Environment:** VMware Workstation (3 VMs — isolated NAT network, `192.168.49.0/24`)
+**Date:** September 2026
 
 ---
 
@@ -105,8 +79,8 @@ Build a mini Security Operations Center (SOC) that ingests logs from multiple en
 6. ✅ **Create alert thresholds** — threshold built into the correlation rule (see §5)
 7. ✅ **Tune false positives** — Suricata suppress rule added for internal SIEM traffic noise (see §6)
 8. ✅ **Map alerts to MITRE ATT&CK** — see §7
-9. 🔲 Build dashboards
-10. 🔲 Document detection logic *(this document)*
+9. ✅ **Build dashboards** — see §9
+10. ✅ **Document detection logic** *(this document)*
 
 ---
 
@@ -201,20 +175,50 @@ This gap and its explanation are themselves a valid SOC analyst deliverable — 
 
 ---
 
-## 8. Known Limitations & Future Work
+## 9. Dashboards
 
-- **TLS not enabled** between Filebeat/Winlogbeat and Elasticsearch (plain HTTP) — acceptable for an isolated lab network, not acceptable for production. See §6.1.
-- **Port-scan detection gap** — signature-based IDS rules did not catch a low-and-slow SYN scan; a statistical/threshold-based detection would close this gap (see §6.2).
-- **Snort → Suricata substitution** — functionally equivalent for this project's purposes, but explicitly noted here for anyone comparing against the original "Project 2" brief.
-- **Dashboards** and further documentation polish remain outstanding.
-- **Next in the portfolio series:** Phishing Detection Pipeline → SOAR Automation Lab → Incident Simulation & Tabletop Exercises → Cloud SOC Pipeline Engineering.
+A single Kibana dashboard was built consolidating the lab's key telemetry into three panels, giving an at-a-glance view of both attack activity and general endpoint health.
+
+### 9.1 Failed SSH Login Attempts Over Time
+
+- **Data view:** `filebeat-*`
+- **Query:** `message: "authenticating user"`
+- **Chart type:** Bar (vertical), date histogram on `@timestamp`, count of records on Y-axis
+
+**What it shows:** A clean, isolated spike of ~17 failed login attempts on the day the Hydra brute-force tests were run, with flat/zero activity on every other day. At a glance, an analyst can immediately identify the anomalous burst without needing to query logs manually — this panel is the visual counterpart to the correlation rule in §5.1.
+
+### 9.2 Log Volume by Endpoint
+
+- **Data view:** combined data view `all-beats-*` (index pattern `filebeat-*,winlogbeat-*`), since Kibana Lens visualizations can only reference one data view at a time and the two log sources live in separate indices
+- **Chart type:** Pie, broken down by `agent.hostname`
+
+**What it shows:** A split of ~62% Windows endpoint (`DESKTOP-8IB3B8N`) vs ~38% Linux endpoint (`soc-linux-endpoint`) log volume. Useful as a sanity check that both pipelines are actively shipping data, and as a baseline — a sudden shift in this ratio (e.g., one endpoint's share dropping to near-zero) would be a fast way to notice a broken or stopped Beats agent.
+
+### 9.3 Top Windows Event Types
+
+- **Data view:** `winlogbeat-*`
+- **Chart type:** Bar (horizontal), top 9 values of `event.code`
+
+**What it shows:** A breakdown of the most frequent Sysmon/Windows Event Log codes. Notable finding: **Event 4907 (Auditing Settings on Object changed)** accounted for roughly 11,000 of the observed events — an order of magnitude more than any other event type (Event 11/FileCreate and Event 13/RegistryEvent each sat around 2,000; security-relevant events like 4624/Successful Logon, 4672/Special Privileges Assigned, and 5379/Credential Manager Read were present but comparatively low-volume).
+
+**Analysis:** This volume is disproportionate to what's actually useful for detection — 4907 events are triggered by routine object-permission auditing (a default/verbose local audit policy setting), not attacker activity, in this lab. This is the same category of finding as the Suricata false positive in §6.1: a real, accurately-logged event that nonetheless drowns out higher-value security events in raw volume. **Recommended follow-up (not yet implemented):** either narrow the Windows audit policy to stop generating 4907 at this rate, or exclude `event.code: 4907` from the default Winlogbeat shipping configuration and rely on a targeted collection method if that specific auditing signal is ever needed.
 
 ---
 
-## 9. Deliverables Checklist
+## 10. Known Limitations & Future Work
+
+- **TLS not enabled** between Filebeat/Winlogbeat and Elasticsearch (plain HTTP) — acceptable for an isolated lab network, not acceptable for production. See §6.1.
+- **Port-scan detection gap** — signature-based IDS rules did not catch a low-and-slow SYN scan; a statistical/threshold-based detection would close this gap (see §6.2).
+- **Snort → Suricata substitution** — functionally equivalent for this project's purposes, but should be explicitly noted in any deliverable referencing the original "Project 2" brief.
+- **Windows audit-log noise** — Event 4907 dominates Windows log volume at roughly 5x the next-highest event type; not yet filtered or tuned out (see §9.3).
+- **Dashboard panels saved "by value"** rather than from a shared visualization library, so they aren't independently reusable across other dashboards without being rebuilt or explicitly saved to the library.
+
+---
+
+## 11. Deliverables Checklist
 
 - [x] SOC architecture diagram (§2)
 - [x] Detection rules (§5)
 - [x] MITRE mapping (§7)
 - [x] Alert tuning notes (§6)
-- [ ] Kibana dashboards
+- [x] Kibana dashboards (§9)
